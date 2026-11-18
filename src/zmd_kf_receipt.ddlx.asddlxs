@@ -1,0 +1,72 @@
+@Metadata.layer: #CORE
+
+@UI: {
+  headerInfo: {
+    typeName: 'Receipt',
+    typeNamePlural: 'Receipts',
+    title: {
+      type: #STANDARD,
+      value: 'filename'
+    },
+    description: {
+      value: 'notes'
+    }
+  }
+}
+
+annotate entity ZC_KF_EC_RECEIPT with
+{
+
+    @UI.facet: [
+      {
+        id              : 'ReceiptDetails',
+        purpose         : #STANDARD,
+        type            : #FIELDGROUP_REFERENCE,
+        label           : 'Receipt Details',
+        targetQualifier : 'ReceiptDetails',
+        position        : 10
+      }
+    ]
+    
+    @EndUserText.label: 'Receipt File'
+    @UI.lineItem: [{ position: 10 }]
+    @UI.fieldGroup: [{
+      qualifier : 'ReceiptDetails',
+      position  : 9
+    }]
+    receipt_file;
+
+    @EndUserText.label: 'File Name'
+    @UI.lineItem: [{ position: 20 }]
+    filename;
+    
+    @EndUserText.label: 'File Type'
+    @UI.lineItem: [{ position: 30 }]
+    mimetype;
+
+    @EndUserText.label: 'Notes'
+    @UI.lineItem: [{ position: 30 }]
+    @UI.multiLineText: true
+    @UI.fieldGroup: [{
+      qualifier : 'ReceiptDetails',
+      position  : 30
+    }]
+    notes;
+
+    @EndUserText.label: 'Uploaded By'
+    @UI.lineItem: [{ position: 40 }]
+    @UI.fieldGroup: [{
+      qualifier : 'ReceiptDetails',
+      position  : 40
+    }]
+    uploaded_by;
+
+    @EndUserText.label: 'Uploaded At'
+    @UI.lineItem: [{ position: 50 }]
+    @UI.fieldGroup: [{
+      qualifier : 'ReceiptDetails',
+      position  : 50
+    }]
+    uploaded_at;
+
+}

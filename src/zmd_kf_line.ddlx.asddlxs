@@ -1,0 +1,96 @@
+@Metadata.layer: #CORE
+
+@UI: {
+  headerInfo: {
+    typeName: 'Expense Line',
+    typeNamePlural: 'Expense Lines',
+    title: {
+      type: #STANDARD,
+      value: 'line_number'
+    },
+    description: {
+      value: 'category'
+    }
+  }
+}
+
+annotate entity ZC_KF_EC_LINE with
+{
+
+    @UI.facet: [
+      {
+        id              : 'ExpenseDetails',
+        purpose         : #STANDARD,
+        type            : #FIELDGROUP_REFERENCE,
+        label           : 'Expense Details',
+        targetQualifier : 'ExpenseDetails',
+        position        : 10
+      },
+      {
+        id            : 'Receipts',
+        purpose       : #STANDARD,
+        type          : #LINEITEM_REFERENCE,
+        label         : 'Receipts',
+        targetElement : '_RECEIPT',
+        position      : 20
+      }
+    ]
+
+    @EndUserText.label: 'Line Number'
+    @UI.lineItem: [{ position: 10 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 10
+    }]
+    line_number;
+
+    @EndUserText.label: 'Expense Date'
+    @UI.lineItem: [{ position: 20 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 20
+    }]
+    expense_date;
+
+    @EndUserText.label: 'Category'
+    @UI.lineItem: [{ position: 30 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 30
+    }]
+    category;
+
+    @EndUserText.label: 'Description'
+    @UI.lineItem: [{ position: 40 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 40
+    }]
+    description;
+
+    @EndUserText.label: 'Amount'
+    @UI.lineItem: [{ position: 50 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 50
+    }]
+    amount;
+
+
+    @EndUserText.label: 'Receipt Required'
+    @UI.lineItem: [{ position: 70 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 70
+    }]
+    receipt_required;
+
+    @EndUserText.label: 'Number of Receipts'
+    @UI.lineItem: [{ position: 80 }]
+    @UI.fieldGroup: [{
+      qualifier: 'ExpenseDetails',
+      position : 80
+    }]
+    number_of_receipts;
+
+}

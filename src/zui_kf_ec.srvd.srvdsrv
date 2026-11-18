@@ -1,0 +1,7 @@
+@EndUserText.label: 'Expense Claim Service'
+define service ZUI_KF_EC {
+  expose ZC_KF_EC_CLAIM       as ExpenseClaim;
+  expose ZC_KF_EC_LINE        as ExpenseLine;
+  expose ZC_KF_EC_RECEIPT     as Receipt;
+  expose ZI_KF_EC_CATEGORY_VH as CategoryValueHelp;
+}

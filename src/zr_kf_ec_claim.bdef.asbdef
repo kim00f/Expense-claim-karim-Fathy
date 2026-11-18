@@ -1,0 +1,163 @@
+managed implementation in class zbp_r_kf_ec_claim unique;
+strict ;
+with draft;
+
+define behavior for ZR_KF_EC_CLAIM //alias <alias_name>
+persistent table zkf_ec_claim
+draft table zkf_draft_claim
+lock master
+total etag last_changed_at
+authorization master ( instance )
+etag master local_last_changed_at
+
+
+{
+
+  field ( readonly ) claim_number;
+
+  field (readonly) created_at ,
+                   total_amount,
+                   status,
+                   created_by,
+                   last_changed_at,
+                   last_changed_by,
+                   local_last_changed_at;
+
+  determination generate_claimno on modify { create;}
+
+  determination setDefaults on modify { create; }
+
+
+  validation validateTripDates on save
+{
+  field trip_start_date, trip_end_date;
+}
+
+field ( features : instance ) currency_code;
+
+
+
+  draft action Edit;
+  draft action Activate optimized;
+  draft action Discard;
+  draft action Resume;
+  draft determine action Prepare;
+
+
+  create ( authorization : global );
+  update;
+  delete;
+  field ( numbering : managed , readonly ) claim_uuid;
+
+  association _line { create; with draft; }
+}
+
+
+
+
+
+
+
+define behavior for ZR_KF_EC_LINE //alias <alias_name>
+persistent table zkf_ec_line
+draft table zkf_draft_line
+lock dependent by _claim
+authorization dependent by _claim
+//etag master <field_name>
+{
+  update;
+  delete;
+
+  field ( numbering : managed, readonly ) line_uuid;
+  field ( readonly ) claim_uuid;
+  field ( readonly ) receipt_required;
+  field ( readonly ) number_of_receipts;
+  field ( readonly ) line_number;
+  determination setLineNumber on modify { create; }
+  determination calculateTotal on modify { create; field amount; }
+  determination setLineCurrency on modify { create; }
+
+  determination setReceiptRequired on modify { create; field amount; }
+
+side effects
+{
+  field amount affects
+    field _claim.total_amount,
+    field receipt_required;
+
+  $self affects permissions ( field _claim.currency_code );
+}
+
+  validation validateAmount on save
+{
+  create;
+  field amount;
+}
+
+validation validateExpenseDate on save
+{
+  create;
+  field expense_date;
+}
+
+validation validateCategory on save
+{
+  create;
+  field category, description;
+}
+
+validation validateRequiredReceipt on save
+{
+  create;
+  field amount;
+}
+
+validation validateMealsLimit on save
+{
+  create;
+  field amount, category, expense_date;
+}
+
+validation validateHotelPerDay on save
+{
+  create;
+  field category, expense_date;
+}
+
+  association _claim {with draft;}
+  association _RECEIPT { create; with draft; }
+}
+
+
+
+
+
+define behavior for ZR_KF_EC_RECEIPT //alias <alias_name>
+persistent table zkf_ec_receipt
+draft table zkf_d_receipt
+lock dependent by  _claim
+authorization dependent by _claim
+//etag master <field_name>
+{
+  update;
+  delete;
+  field ( numbering : managed, readonly ) receipt_uuid;
+  field ( readonly ) line_uuid, claim_uuid;
+  field ( readonly ) uploaded_by, uploaded_at;
+
+  determination updateReceiptCount on modify { create; }
+
+  side effects
+{
+  $self affects field _line.number_of_receipts;
+}
+
+validation validateReceiptFile on save
+{
+  create;
+  field receipt_file;
+}
+
+  association _line {with draft;}
+  association _claim {with draft;}
+}

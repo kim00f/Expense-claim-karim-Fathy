@@ -1,0 +1,40 @@
+projection;
+strict ;
+ use side effects;
+use draft;
+
+
+define behavior for ZC_KF_EC_CLAIM //alias <alias_name>
+{
+  use create;
+  use update;
+  use delete;
+
+  use action Edit;
+  use action Activate;
+  use action Discard;
+  use action Resume;
+  use action Prepare;
+
+  use association _line { create; with draft; }
+}
+
+define behavior for ZC_KF_EC_LINE //alias <alias_name>
+{
+  use update;
+  use delete;
+
+
+
+  use association _claim { with draft; }
+  use association _RECEIPT { create; with draft;}
+}
+
+define behavior for ZC_KF_EC_RECEIPT //alias <alias_name>
+{
+  use update;
+  use delete;
+
+  use association _line { with draft; }
+  use association _claim { with draft; }
+}
