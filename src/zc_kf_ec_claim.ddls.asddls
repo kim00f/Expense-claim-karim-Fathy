@@ -34,6 +34,8 @@ destination_country,
 ]
     currency_code,
     status,
+    @ObjectModel.virtualElementCalculatedBy: 'ABAP:ZCL_KF_EC_STATUS_CRIT'
+    virtual status_criticality : abap.int1,
     submitted_on,
     decision_date,
     rejection_reason,

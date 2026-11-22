@@ -13,15 +13,20 @@ etag master local_last_changed_at
 
 {
 
-  field ( readonly ) claim_number;
-
-  field (readonly) created_at ,
-                   total_amount,
-                   status,
-                   created_by,
-                   last_changed_at,
-                   last_changed_by,
-                   local_last_changed_at;
+  field ( readonly )
+  claim_number,
+  total_amount,
+  status,
+  submitted_on,
+  decision_date,
+  rejection_reason,
+  payment_reference,
+  payment_date,
+  created_at,
+  created_by,
+  last_changed_at,
+  last_changed_by,
+  local_last_changed_at;
 
   determination generate_claimno on modify { create;}
 
@@ -33,21 +38,58 @@ etag master local_last_changed_at
   field trip_start_date, trip_end_date;
 }
 
-field ( features : instance ) currency_code;
+field ( features : instance )
+  employee_name,
+  trip_purpose,
+  destination_country,
+  trip_start_date,
+  trip_end_date,
+  currency_code;
+
+action ( features : instance ) Submit result [1] $self;
+action ( features : instance ) Withdraw result [1] $self;
+action ( features : instance ) Approve result [1] $self;
+action ( features : instance ) Reject
+  parameter ZKF_EC_REJECT_PARAM
+  result [1] $self;
+action ( features : instance ) MarkAsPaid
+  parameter ZKF_EC_PAYMENT_PARAM
+  result [1] $self;
+action CopyClaim result [1] $self;
+static action MassApprove
+  parameter ZKF_EC_MASS_APPROVE_PARAM;
 
 
 
-  draft action Edit;
+
+
+validation validateRequiredFields on save
+{
+  create;
+  field employee_name,
+        trip_purpose,
+        destination_country,
+        trip_start_date,
+        trip_end_date,
+        currency_code;
+}
+
+
+  draft action ( features : instance ) Edit;
   draft action Activate optimized;
   draft action Discard;
   draft action Resume;
   draft determine action Prepare;
 
 
+
+
   create ( authorization : global );
-  update;
-  delete;
+  update ( features : instance );
+  delete( features : instance );
   field ( numbering : managed , readonly ) claim_uuid;
+
+
 
   association _line { create; with draft; }
 }
@@ -73,6 +115,12 @@ authorization dependent by _claim
   field ( readonly ) receipt_required;
   field ( readonly ) number_of_receipts;
   field ( readonly ) line_number;
+
+  field ( mandatory )
+  expense_date,
+  category,
+  amount;
+
   determination setLineNumber on modify { create; }
   determination calculateTotal on modify { create; field amount; }
   determination setLineCurrency on modify { create; }
@@ -86,6 +134,7 @@ side effects
     field receipt_required;
 
   $self affects permissions ( field _claim.currency_code );
+
 }
 
   validation validateAmount on save
@@ -124,6 +173,12 @@ validation validateHotelPerDay on save
   field category, expense_date;
 }
 
+validation validateRequiredLineFields on save
+{
+  create;
+  field expense_date, category, amount;
+}
+
   association _claim {with draft;}
   association _RECEIPT { create; with draft; }
 }
@@ -157,6 +212,9 @@ validation validateReceiptFile on save
   create;
   field receipt_file;
 }
+
+field ( mandatory ) receipt_file;
+
 
   association _line {with draft;}
   association _claim {with draft;}

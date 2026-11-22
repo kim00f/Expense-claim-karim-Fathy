@@ -59,8 +59,26 @@ ENDMETHOD.
   LOOP AT lt_receipts INTO DATA(ls_receipt).
 
     IF ls_receipt-receipt_file IS INITIAL.
-      CONTINUE.
-    ENDIF.
+
+  APPEND VALUE #(
+    %tky = ls_receipt-%tky
+  ) TO failed-zr_kf_ec_receipt.
+
+  APPEND VALUE #(
+    %tky = ls_receipt-%tky
+
+    %msg = new_message_with_text(
+      severity = if_abap_behv_message=>severity-error
+      text     = 'Receipt File is required.'
+    )
+
+    %element-receipt_file = if_abap_behv=>mk-on
+
+  ) TO reported-zr_kf_ec_receipt.
+
+  CONTINUE.
+
+ENDIF.
 
 
     IF to_lower( ls_receipt-mimetype ) <> 'application/pdf'.
@@ -146,6 +164,8 @@ CLASS lhc_zr_kf_ec_line DEFINITION INHERITING FROM cl_abap_behavior_handler.
       keys FOR ZR_KF_EC_LINE~validateMealsLimit.
     METHODS validateHotelPerDay FOR VALIDATE ON SAVE
       keys FOR ZR_KF_EC_LINE~validateHotelPerDay.
+    METHODS validateRequiredLineFields FOR VALIDATE ON SAVE
+      keys FOR ZR_KF_EC_LINE~validateRequiredLineFields.
 
 
 ENDCLASS.
@@ -718,6 +738,91 @@ ENDMETHOD.
 
 ENDMETHOD.
 
+  METHOD validateRequiredLineFields.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_line
+    FIELDS (
+      line_number
+      expense_date
+      category
+      amount
+    )
+    WITH CORRESPONDING #( keys )
+    RESULT DATA(lt_lines).
+
+
+  LOOP AT lt_lines INTO DATA(ls_line).
+
+    " Expense Date
+    IF ls_line-expense_date IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_line-%tky
+      ) TO failed-zr_kf_ec_line.
+
+      APPEND VALUE #(
+        %tky = ls_line-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = |Line { ls_line-line_number }: Expense Date is required.|
+        )
+
+        %element-expense_date = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_line.
+
+    ENDIF.
+
+
+    " Category
+    IF ls_line-category IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_line-%tky
+      ) TO failed-zr_kf_ec_line.
+
+      APPEND VALUE #(
+        %tky = ls_line-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = |Line { ls_line-line_number }: Category is required.|
+        )
+
+        %element-category = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_line.
+
+    ENDIF.
+
+
+    " Amount
+    IF ls_line-amount IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_line-%tky
+      ) TO failed-zr_kf_ec_line.
+
+      APPEND VALUE #(
+        %tky = ls_line-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = |Line { ls_line-line_number }: Amount is required.|
+        )
+
+        %element-amount = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_line.
+
+    ENDIF.
+
+  ENDLOOP.
+
+ENDMETHOD.
+
 ENDCLASS.
 
 CLASS lhc_ZR_KF_EC_CLAIM DEFINITION INHERITING FROM cl_abap_behavior_handler.
@@ -736,6 +841,22 @@ CLASS lhc_ZR_KF_EC_CLAIM DEFINITION INHERITING FROM cl_abap_behavior_handler.
       keys FOR zr_kf_ec_claim~validatetripdates.
     METHODS get_instance_features FOR INSTANCE FEATURES
       keys REQUEST requested_features FOR zr_kf_ec_claim RESULT result.
+    METHODS submit FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~submit RESULT result.
+    METHODS withdraw FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~withdraw RESULT result.
+    METHODS approve FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~approve RESULT result.
+    METHODS reject FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~reject RESULT result.
+    METHODS markaspaid FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~markaspaid RESULT result.
+    METHODS copyclaim FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~copyclaim RESULT result.
+    METHODS massapprove FOR MODIFY
+      keys FOR ACTION zr_kf_ec_claim~massapprove.
+    METHODS validaterequiredfields FOR VALIDATE ON SAVE
+      keys FOR zr_kf_ec_claim~validaterequiredfields.
 
 
 ENDCLASS.
@@ -835,16 +956,22 @@ METHOD validateTripDates.
 
 ENDMETHOD.
 
-  METHOD get_instance_features.
+METHOD get_instance_features.
 
   READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
     ENTITY zr_kf_ec_claim
-      FIELDS ( currency_code )
+      FIELDS (
+        status
+        currency_code
+      )
       WITH CORRESPONDING #( keys )
       RESULT DATA(lt_claims).
 
+
   LOOP AT lt_claims INTO DATA(ls_claim).
 
+    " Read Expense Lines.
+    " Currency is editable only when there are no Lines.
     READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
       ENTITY zr_kf_ec_claim BY \_line
         FIELDS ( line_uuid )
@@ -853,19 +980,1365 @@ ENDMETHOD.
         )
         RESULT DATA(lt_lines).
 
+
+    " Open and Rejected Claims are editable.
+    DATA(lv_claim_editable) = xsdbool(
+      ls_claim-status = 'Open'
+      OR
+      ls_claim-status = 'Rejected'
+    ).
+
+
     APPEND VALUE #(
       %tky = ls_claim-%tky
 
+
+      " ===========================================
+      " CLAIM FIELD CONTROL
+      " Open / Rejected -> mandatory
+      " Other statuses -> readonly
+      " ===========================================
+
+      %field-employee_name = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-f-mandatory
+        ELSE
+          if_abap_behv=>fc-f-read_only
+      )
+
+      %field-trip_purpose = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-f-mandatory
+        ELSE
+          if_abap_behv=>fc-f-read_only
+      )
+
+      %field-destination_country = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-f-mandatory
+        ELSE
+          if_abap_behv=>fc-f-read_only
+      )
+
+      %field-trip_start_date = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-f-mandatory
+        ELSE
+          if_abap_behv=>fc-f-read_only
+      )
+
+      %field-trip_end_date = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-f-mandatory
+        ELSE
+          if_abap_behv=>fc-f-read_only
+      )
+
+
+      " Currency:
+      " Open / Rejected + no Lines -> mandatory/editable
+      " Otherwise -> readonly
       %field-currency_code = COND #(
+        WHEN lv_claim_editable = abap_true
+         AND lt_lines IS INITIAL
+          THEN if_abap_behv=>fc-f-mandatory
+        ELSE
+          if_abap_behv=>fc-f-read_only
+      )
 
-        WHEN lt_lines IS INITIAL
-        THEN if_abap_behv=>fc-f-unrestricted
 
-        ELSE if_abap_behv=>fc-f-read_only
+      " ===========================================
+      " WORKFLOW ACTIONS
+      " ===========================================
 
+      %action-Submit = COND #(
+        WHEN ls_claim-status = 'Open'
+          OR ls_claim-status = 'Rejected'
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+      %action-Withdraw = COND #(
+        WHEN ls_claim-status = 'Submitted'
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+      %action-Approve = COND #(
+        WHEN ls_claim-status = 'Submitted'
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+      %action-Reject = COND #(
+        WHEN ls_claim-status = 'Submitted'
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+      %action-MarkAsPaid = COND #(
+        WHEN ls_claim-status = 'Approved'
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+
+      " ===========================================
+      " STANDARD OPERATIONS / DRAFT EDIT
+      " ===========================================
+
+      %update = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+      %delete = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
+      )
+
+      %action-Edit = COND #(
+        WHEN lv_claim_editable = abap_true
+          THEN if_abap_behv=>fc-o-enabled
+        ELSE
+          if_abap_behv=>fc-o-disabled
       )
 
     ) TO result.
+
+  ENDLOOP.
+
+ENDMETHOD.
+  METHOD Submit.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+    ENTITY zr_kf_ec_claim
+      FIELDS (
+        status
+        trip_end_date
+      )
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_claims)
+
+    ENTITY zr_kf_ec_claim BY \_line
+      FROM CORRESPONDING #( keys )
+      LINK DATA(lt_line_links).
+
+
+  LOOP AT lt_claims INTO DATA(ls_claim).
+
+    DATA(lv_submit_failed) = abap_false.
+
+
+    " Submit is only allowed from Open or Rejected
+    IF ls_claim-status <> 'Open'
+       AND ls_claim-status <> 'Rejected'.
+
+      lv_submit_failed = abap_true.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Only Open or Rejected claims can be submitted.'
+        )
+
+        %action-Submit = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " BR-11: Claim must contain at least one Expense Line
+    IF NOT line_exists(
+      lt_line_links[
+        source-%tky = ls_claim-%tky
+      ]
+    ).
+
+      lv_submit_failed = abap_true.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Submit refused: the claim must contain at least one expense line.'
+        )
+
+        %action-Submit = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " BR-11: Trip must have ended
+    IF ls_claim-trip_end_date IS INITIAL
+       OR ls_claim-trip_end_date > cl_abap_context_info=>get_system_date( ).
+
+      lv_submit_failed = abap_true.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Submit refused: the trip must have ended.'
+        )
+
+        %element-trip_end_date = if_abap_behv=>mk-on
+        %action-Submit         = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " Report every reason, then fail the action once
+    IF lv_submit_failed = abap_true.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " BR-11 passed: perform the transition
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+      ENTITY zr_kf_ec_claim
+        UPDATE FIELDS (
+          status
+          submitted_on
+          rejection_reason
+          decision_date
+        )
+        WITH VALUE #(
+          (
+            %tky             = ls_claim-%tky
+            status           = 'Submitted'
+            submitted_on     = cl_abap_context_info=>get_system_date( )
+            rejection_reason = ''
+            decision_date    = '00000000'
+          )
+        )
+        FAILED DATA(lt_update_failed)
+        REPORTED DATA(lt_update_reported).
+
+    APPEND LINES OF lt_update_failed-zr_kf_ec_claim
+      TO failed-zr_kf_ec_claim.
+
+    APPEND LINES OF lt_update_reported-zr_kf_ec_claim
+      TO reported-zr_kf_ec_claim.
+
+  ENDLOOP.
+
+
+  " Return the updated instances to Fiori
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      ALL FIELDS
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_result_claims).
+
+
+  result = VALUE #(
+    FOR ls_result_claim IN lt_result_claims
+    (
+      %tky   = ls_result_claim-%tky
+      %param = ls_result_claim
+    )
+  ).
+
+ENDMETHOD.
+  METHOD Withdraw.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      FIELDS ( status )
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_claims).
+
+
+  LOOP AT lt_claims INTO DATA(ls_claim).
+
+    " Withdraw is only allowed for Submitted claims
+    IF ls_claim-status <> 'Submitted'.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Only Submitted claims can be withdrawn.'
+        )
+
+        %action-Withdraw = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " FR-202:
+    " Submitted -> Open
+    " Submitted On is cleared
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+      ENTITY zr_kf_ec_claim
+        UPDATE FIELDS (
+          status
+          submitted_on
+        )
+        WITH VALUE #(
+          (
+            %tky         = ls_claim-%tky
+            status       = 'Open'
+            submitted_on = '00000000'
+          )
+        ).
+
+  ENDLOOP.
+
+
+  " Return the updated Claim to Fiori
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      ALL FIELDS
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_result_claims).
+
+
+  result = VALUE #(
+    FOR ls_result_claim IN lt_result_claims
+    (
+      %tky   = ls_result_claim-%tky
+      %param = ls_result_claim
+    )
+  ).
+
+ENDMETHOD.
+
+  METHOD Approve.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      FIELDS (
+        status
+        total_amount
+      )
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_claims).
+
+
+  LOOP AT lt_claims INTO DATA(ls_claim).
+
+    " Approve only works for Submitted claims
+    IF ls_claim-status <> 'Submitted'.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Only Submitted claims can be approved.'
+        )
+
+        %action-Approve = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " BR-12
+    " Anything above EUR 5,000.00 requires Director approval
+    IF ls_claim-total_amount > 5000.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      DATA(lv_message) =
+        |Approve refused: total amount exceeds EUR 5,000.00.|.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = lv_message
+        )
+
+        %element-total_amount = if_abap_behv=>mk-on
+        %action-Approve       = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " All checks passed:
+    " Submitted -> Approved
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+      ENTITY zr_kf_ec_claim
+        UPDATE FIELDS (
+          status
+          decision_date
+        )
+        WITH VALUE #(
+          (
+            %tky          = ls_claim-%tky
+            status        = 'Approved'
+            decision_date = cl_abap_context_info=>get_system_date( )
+          )
+        ).
+
+  ENDLOOP.
+
+
+  " Return updated Claim to Fiori
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      ALL FIELDS
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_result_claims).
+
+
+  result = VALUE #(
+    FOR ls_result_claim IN lt_result_claims
+    (
+      %tky   = ls_result_claim-%tky
+      %param = ls_result_claim
+    )
+  ).
+
+ENDMETHOD.
+
+  METHOD Reject.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      FIELDS ( status )
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_claims).
+
+
+  LOOP AT keys INTO DATA(ls_key).
+
+    READ TABLE lt_claims
+      INTO DATA(ls_claim)
+      WITH KEY %tky = ls_key-%tky.
+
+    CHECK sy-subrc = 0.
+
+
+    " Reject is allowed only for Submitted Claims
+    IF ls_claim-status <> 'Submitted'.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Only Submitted claims can be rejected.'
+        )
+
+        %action-Reject = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " Read the reason entered in the popup
+    DATA(lv_rejection_reason) =
+      CONV string( ls_key-%param-rejection_reason ).
+
+    " Ignore accidental spaces at the beginning and end
+    SHIFT lv_rejection_reason LEFT
+      DELETING LEADING space.
+
+    SHIFT lv_rejection_reason RIGHT
+      DELETING TRAILING space.
+
+
+    " BR-13:
+    " Rejection reason must contain at least 15 characters
+    IF strlen( lv_rejection_reason ) < 15.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Reject refused: the rejection reason must contain at least 15 characters.'
+        )
+
+        %action-Reject = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " All checks passed:
+    " Submitted -> Rejected
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+      ENTITY zr_kf_ec_claim
+        UPDATE FIELDS (
+          status
+          rejection_reason
+          decision_date
+        )
+        WITH VALUE #(
+          (
+            %tky             = ls_claim-%tky
+            status           = 'Rejected'
+            rejection_reason = lv_rejection_reason
+            decision_date    =
+              cl_abap_context_info=>get_system_date( )
+          )
+        )
+        FAILED DATA(lt_update_failed)
+        REPORTED DATA(lt_update_reported).
+
+
+    APPEND LINES OF
+      lt_update_failed-zr_kf_ec_claim
+      TO failed-zr_kf_ec_claim.
+
+    APPEND LINES OF
+      lt_update_reported-zr_kf_ec_claim
+      TO reported-zr_kf_ec_claim.
+
+  ENDLOOP.
+
+
+  " Return the updated instances to Fiori
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      ALL FIELDS
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_result_claims).
+
+
+  result = VALUE #(
+    FOR ls_result_claim IN lt_result_claims
+    (
+      %tky   = ls_result_claim-%tky
+      %param = ls_result_claim
+    )
+  ).
+
+ENDMETHOD.
+
+  METHOD MarkAsPaid.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      FIELDS (
+        status
+        decision_date
+      )
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_claims).
+
+
+  LOOP AT keys INTO DATA(ls_key).
+
+    READ TABLE lt_claims
+      INTO DATA(ls_claim)
+      WITH KEY %tky = ls_key-%tky.
+
+    CHECK sy-subrc = 0.
+
+
+    " Mark as Paid is only possible from Approved
+    IF ls_claim-status <> 'Approved'.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Only Approved claims can be marked as Paid.'
+        )
+
+        %action-MarkAsPaid = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    DATA(lv_payment_reference) =
+      CONV string( ls_key-%param-payment_reference ).
+
+    DATA(lv_payment_date) =
+      ls_key-%param-payment_date.
+
+
+    " Remove accidental spaces
+    SHIFT lv_payment_reference LEFT
+      DELETING LEADING space.
+
+    SHIFT lv_payment_reference RIGHT
+      DELETING TRAILING space.
+
+
+    " BR-14: Payment Reference is required
+    IF lv_payment_reference IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Payment reference is required.'
+        )
+
+        %action-MarkAsPaid = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " For now, if blank, use today.
+    " Later we can default this directly in the popup.
+    IF lv_payment_date IS INITIAL.
+
+      lv_payment_date =
+        cl_abap_context_info=>get_system_date( ).
+
+    ENDIF.
+
+
+    " BR-14: Payment Date cannot be in the future
+    IF lv_payment_date >
+       cl_abap_context_info=>get_system_date( ).
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Payment date must not be in the future.'
+        )
+
+        %action-MarkAsPaid = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " BR-14:
+    " Payment Date cannot be before Decision Date
+    IF ls_claim-decision_date IS NOT INITIAL
+       AND lv_payment_date < ls_claim-decision_date.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Payment date must not be before the decision date.'
+        )
+
+        %action-MarkAsPaid = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " BR-14 passed
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+      ENTITY zr_kf_ec_claim
+        UPDATE FIELDS (
+          status
+          payment_reference
+          payment_date
+        )
+        WITH VALUE #(
+          (
+            %tky              = ls_claim-%tky
+            status            = 'Paid'
+            payment_reference = lv_payment_reference
+            payment_date      = lv_payment_date
+          )
+        ).
+
+  ENDLOOP.
+
+
+  " Return updated instances
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      ALL FIELDS
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_result_claims).
+
+
+  result = VALUE #(
+    FOR ls_result_claim IN lt_result_claims
+    (
+      %tky   = ls_result_claim-%tky
+      %param = ls_result_claim
+    )
+  ).
+
+ENDMETHOD.
+
+  METHOD CopyClaim.
+
+  " Read the original Claims selected for Copy
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+      ALL FIELDS
+      WITH CORRESPONDING #( keys )
+      RESULT DATA(lt_source_claims).
+
+
+  LOOP AT lt_source_claims INTO DATA(ls_source_claim).
+
+    DATA(lv_claim_index) = sy-tabix.
+    DATA(lv_copy_failed) = abap_false.
+
+    DATA(lv_claim_cid) =
+      |COPY_CLAIM_{ lv_claim_index }|.
+
+    DATA lv_copy_purpose TYPE zkf_ec_claim-trip_purpose.
+
+    lv_copy_purpose =
+      |Copy of { ls_source_claim-trip_purpose }|.
+
+
+    " =========================================================
+    " STEP 1: CREATE THE NEW ROOT CLAIM
+    " =========================================================
+
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+      ENTITY zr_kf_ec_claim
+
+        CREATE FIELDS (
+          employee_name
+          trip_purpose
+          destination_country
+          trip_start_date
+          trip_end_date
+          currency_code
+        )
+
+        WITH VALUE #(
+          (
+            %cid                = lv_claim_cid
+            employee_name       = ls_source_claim-employee_name
+            trip_purpose        = lv_copy_purpose
+            destination_country = ls_source_claim-destination_country
+            trip_start_date     = ls_source_claim-trip_start_date
+            trip_end_date       = ls_source_claim-trip_end_date
+            currency_code       = ls_source_claim-currency_code
+          )
+        )
+
+        MAPPED DATA(lt_mapped_claim)
+        FAILED DATA(lt_failed_claim)
+        REPORTED DATA(lt_reported_claim).
+
+
+    " Stop if the new Claim could not be created
+    IF lt_failed_claim-zr_kf_ec_claim IS NOT INITIAL
+       OR lt_mapped_claim-zr_kf_ec_claim IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_source_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_source_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'The Claim copy could not be created.'
+        )
+
+        %action-CopyClaim = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " Get the transactional key of the new Claim
+    DATA(ls_new_claim_key) =
+      lt_mapped_claim-zr_kf_ec_claim[
+        %cid = lv_claim_cid
+      ].
+
+
+    " setDefaults runs on Claim creation and sets EUR.
+    " Copy the original Claim currency again afterwards.
+    MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+      ENTITY zr_kf_ec_claim
+
+        UPDATE FIELDS ( currency_code )
+
+        WITH VALUE #(
+          (
+            %tky          = ls_new_claim_key-%tky
+            currency_code = ls_source_claim-currency_code
+          )
+        ).
+
+
+    " =========================================================
+    " STEP 2: READ THE ORIGINAL EXPENSE LINES
+    " =========================================================
+
+    READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+      ENTITY zr_kf_ec_claim BY \_line
+
+        ALL FIELDS
+
+        WITH VALUE #(
+          ( %tky = ls_source_claim-%tky )
+        )
+
+        RESULT DATA(lt_source_lines).
+
+
+    DATA lv_line_index TYPE i.
+    DATA lv_receipt_index TYPE i.
+
+
+    LOOP AT lt_source_lines INTO DATA(ls_source_line).
+
+      lv_line_index = lv_line_index + 1.
+
+      DATA(lv_line_cid) =
+        |COPY_LINE_{ lv_claim_index }_{ lv_line_index }|.
+
+
+      " =======================================================
+      " STEP 3: READ THE ORIGINAL RECEIPTS FOR THIS LINE
+      " =======================================================
+
+      READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+        ENTITY zr_kf_ec_line BY \_RECEIPT
+
+          ALL FIELDS
+
+          WITH VALUE #(
+            ( %tky = ls_source_line-%tky )
+          )
+
+          RESULT DATA(lt_source_receipts).
+
+
+      " =======================================================
+      " STEP 4: CREATE THE COPIED EXPENSE LINE
+      " =======================================================
+
+      MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+        ENTITY zr_kf_ec_claim
+
+          CREATE BY \_line
+
+          FIELDS (
+            expense_date
+            category
+            description
+            amount
+          )
+
+          WITH VALUE #(
+            (
+              %tky = ls_new_claim_key-%tky
+
+              %target = VALUE #(
+                (
+                  %cid         = lv_line_cid
+                  expense_date = ls_source_line-expense_date
+                  category     = ls_source_line-category
+                  description  = ls_source_line-description
+                  amount       = ls_source_line-amount
+                )
+              )
+            )
+          )
+
+          MAPPED DATA(lt_mapped_line)
+          FAILED DATA(lt_failed_line)
+          REPORTED DATA(lt_reported_line).
+
+
+      IF lt_failed_line-zr_kf_ec_line IS NOT INITIAL
+         OR lt_mapped_line-zr_kf_ec_line IS INITIAL.
+
+        lv_copy_failed = abap_true.
+        EXIT.
+
+      ENDIF.
+
+
+      " Get the transactional key of the copied Line
+      DATA(ls_new_line_key) =
+        lt_mapped_line-zr_kf_ec_line[
+          %cid = lv_line_cid
+        ].
+
+
+      " =======================================================
+      " STEP 5: CREATE COPIED RECEIPTS FOR THIS NEW LINE
+      " =======================================================
+
+      LOOP AT lt_source_receipts INTO DATA(ls_source_receipt).
+
+        lv_receipt_index = lv_receipt_index + 1.
+
+        DATA(lv_receipt_cid) =
+          |COPY_RECEIPT_{ lv_claim_index }_{ lv_receipt_index }|.
+
+
+        MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+          ENTITY zr_kf_ec_line
+
+            CREATE BY \_RECEIPT
+
+            FIELDS (
+              receipt_file
+              filename
+              mimetype
+              notes
+            )
+
+            WITH VALUE #(
+              (
+                %tky = ls_new_line_key-%tky
+
+                %target = VALUE #(
+                  (
+                    %cid         = lv_receipt_cid
+                    receipt_file = ls_source_receipt-receipt_file
+                    filename     = ls_source_receipt-filename
+                    mimetype     = ls_source_receipt-mimetype
+                    notes        = ls_source_receipt-notes
+                  )
+                )
+              )
+            )
+
+            MAPPED DATA(lt_mapped_receipt)
+            FAILED DATA(lt_failed_receipt)
+            REPORTED DATA(lt_reported_receipt).
+
+
+        IF lt_failed_receipt-zr_kf_ec_receipt IS NOT INITIAL.
+
+          lv_copy_failed = abap_true.
+          EXIT.
+
+        ENDIF.
+
+      ENDLOOP.
+
+
+      IF lv_copy_failed = abap_true.
+        EXIT.
+      ENDIF.
+
+    ENDLOOP.
+
+
+    " =========================================================
+    " STEP 6: HANDLE ANY CHILD-COPY FAILURE
+    " =========================================================
+
+    IF lv_copy_failed = abap_true.
+
+      APPEND VALUE #(
+        %tky = ls_source_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_source_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'The Claim could not be copied with all Expense Lines and Receipts.'
+        )
+
+        %action-CopyClaim = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+      CONTINUE.
+
+    ENDIF.
+
+
+    " =========================================================
+    " STEP 7: READ AND RETURN THE NEW CLAIM
+    " =========================================================
+
+    READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+
+      ENTITY zr_kf_ec_claim
+
+        ALL FIELDS
+
+        WITH VALUE #(
+          ( %tky = ls_new_claim_key-%tky )
+        )
+
+        RESULT DATA(lt_new_claims).
+
+
+    CHECK lt_new_claims IS NOT INITIAL.
+
+
+    APPEND VALUE #(
+      %tky   = ls_source_claim-%tky
+      %param = lt_new_claims[ 1 ]
+    ) TO result.
+
+  ENDLOOP.
+
+ENDMETHOD.
+
+  METHOD massapprove.
+
+  " Static action -> one parameter entry
+  READ TABLE keys INTO DATA(ls_key) INDEX 1.
+
+  CHECK sy-subrc = 0.
+
+  DATA(lv_maximum_amount) =
+    ls_key-%param-maximum_amount.
+
+
+  " ==========================================
+  " BR-15: Maximum Amount itself <= EUR 5,000
+  " ==========================================
+
+  IF lv_maximum_amount > 5000.
+
+    APPEND VALUE #(
+      %msg = new_message_with_text(
+        severity = if_abap_behv_message=>severity-error
+        text     = 'Mass approval refused: maximum amount cannot exceed EUR 5,000.00.'
+      )
+    ) TO reported-zr_kf_ec_claim.
+
+    RETURN.
+
+  ENDIF.
+
+
+  " ==========================================
+  " Find eligible Submitted Claims
+  " ==========================================
+
+  SELECT claim_uuid,
+         status,
+         total_amount
+    FROM zr_kf_ec_claim
+    WHERE status = 'Submitted'
+      AND total_amount <= @lv_maximum_amount
+    INTO TABLE @DATA(lt_claims_to_approve).
+
+
+  " Nothing qualified
+  IF lt_claims_to_approve IS INITIAL.
+
+    APPEND VALUE #(
+      %msg = new_message_with_text(
+        severity = if_abap_behv_message=>severity-information
+        text     = 'No claims qualified for mass approval.'
+      )
+    ) TO reported-zr_kf_ec_claim.
+
+    RETURN.
+
+  ENDIF.
+
+
+  " ==========================================
+  " Approve all qualifying Claims
+  " ==========================================
+
+  MODIFY ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+
+      UPDATE FIELDS (
+        status
+        decision_date
+      )
+
+      WITH VALUE #(
+        FOR ls_claim IN lt_claims_to_approve
+        (
+          claim_uuid    = ls_claim-claim_uuid
+          status        = 'Approved'
+          decision_date =
+            cl_abap_context_info=>get_system_date( )
+        )
+      )
+
+      FAILED DATA(lt_failed)
+      REPORTED DATA(lt_reported).
+
+
+  APPEND LINES OF lt_failed-zr_kf_ec_claim
+    TO failed-zr_kf_ec_claim.
+
+  APPEND LINES OF lt_reported-zr_kf_ec_claim
+    TO reported-zr_kf_ec_claim.
+
+
+  " ==========================================
+  " Success message
+  " ==========================================
+
+  DATA(lv_approved_count) =
+    lines( lt_claims_to_approve ).
+
+  DATA(lv_message) =
+    |{ lv_approved_count } claims were approved.|.
+
+
+  APPEND VALUE #(
+    %msg = new_message_with_text(
+      severity = if_abap_behv_message=>severity-success
+      text     = lv_message
+    )
+  ) TO reported-zr_kf_ec_claim.
+
+ENDMETHOD.
+
+  METHOD validateRequiredFields.
+
+  READ ENTITIES OF zr_kf_ec_claim IN LOCAL MODE
+    ENTITY zr_kf_ec_claim
+    FIELDS (
+      employee_name
+      trip_purpose
+      destination_country
+      trip_start_date
+      trip_end_date
+      currency_code
+    )
+    WITH CORRESPONDING #( keys )
+    RESULT DATA(lt_claims).
+
+
+  LOOP AT lt_claims INTO DATA(ls_claim).
+
+    " Employee Name
+    IF ls_claim-employee_name IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Employee Name is required.'
+        )
+
+        %element-employee_name = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " Trip Purpose
+    IF ls_claim-trip_purpose IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Trip Purpose is required.'
+        )
+
+        %element-trip_purpose = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " Destination Country
+    IF ls_claim-destination_country IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Destination Country is required.'
+        )
+
+        %element-destination_country = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " Trip Start Date
+    IF ls_claim-trip_start_date IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Trip Start Date is required.'
+        )
+
+        %element-trip_start_date = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " Trip End Date
+    IF ls_claim-trip_end_date IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Trip End Date is required.'
+        )
+
+        %element-trip_end_date = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
+
+
+    " Currency
+    IF ls_claim-currency_code IS INITIAL.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+      ) TO failed-zr_kf_ec_claim.
+
+      APPEND VALUE #(
+        %tky = ls_claim-%tky
+
+        %msg = new_message_with_text(
+          severity = if_abap_behv_message=>severity-error
+          text     = 'Currency is required.'
+        )
+
+        %element-currency_code = if_abap_behv=>mk-on
+
+      ) TO reported-zr_kf_ec_claim.
+
+    ENDIF.
 
   ENDLOOP.
 

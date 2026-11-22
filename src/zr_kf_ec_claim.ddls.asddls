@@ -20,10 +20,15 @@ composition [0..*] of  ZR_KF_EC_LINE as _line
     rejection_reason,
     payment_reference ,
     payment_date,
+    @Semantics.user.createdBy: true
     created_by,
+    @Semantics.systemDateTime.createdAt: true
     created_at ,
+    @Semantics.user.lastChangedBy: true
     last_changed_by,
+    @Semantics.systemDateTime.lastChangedAt: true
     last_changed_at ,
+    @Semantics.systemDateTime.localInstanceLastChangedAt: true
     local_last_changed_at ,
     
     

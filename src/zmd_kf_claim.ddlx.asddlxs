@@ -49,17 +49,70 @@ annotate entity ZC_KF_EC_CLAIM
         type            : #FIELDGROUP_REFERENCE,
         label           : 'Administration',
         targetQualifier : 'Administration',
-        position        : 30
-      }
+        position        : 40
+      },
+      {
+  id              : 'WorkflowInfo',
+  purpose         : #STANDARD,
+  type            : #FIELDGROUP_REFERENCE,
+  label           : 'Workflow Information',
+  targetQualifier : 'WorkflowInfo',
+  position        : 30
+}
     ]
 
     @EndUserText.label: 'Claim Number'
-    @UI.lineItem: [{ position: 10 }]
+    @UI.lineItem: [{ position: 10 },
+  {
+    position   : 5,
+    type       : #FOR_ACTION,
+    dataAction : 'MassApprove',
+    label      : 'Mass Approve'
+  }]
     @UI.selectionField: [{ position: 10 }]
     @UI.fieldGroup: [{
   qualifier: 'ClaimDetails',
   position: 10
 }]
+    @UI.identification: [
+  {
+    position   : 10,
+    type       : #FOR_ACTION,
+    dataAction : 'Submit',
+    label      : 'Submit'
+  },
+  {
+    position   : 20,
+    type       : #FOR_ACTION,
+    dataAction : 'Withdraw',
+    label      : 'Withdraw'
+  },
+  {
+    position   : 30,
+    type       : #FOR_ACTION,
+    dataAction : 'Approve',
+    label      : 'Approve'
+  },
+  {
+    position   : 40,
+    type       : #FOR_ACTION,
+    dataAction : 'Reject',
+    label      : 'Reject'
+  },
+  {
+  position   : 50,
+  type       : #FOR_ACTION,
+  dataAction : 'MarkAsPaid',
+  label      : 'Mark as Paid'
+},
+{
+  position   : 60,
+  type       : #FOR_ACTION,
+  dataAction : 'CopyClaim',
+  label      : 'Copy Claim'
+}
+  
+]
     claim_number;
 
     @EndUserText.label: 'Employee Name'
@@ -70,14 +123,36 @@ annotate entity ZC_KF_EC_CLAIM
   position: 20
 }]
     employee_name;
-    @EndUserText.label: 'Status'
-    @UI.lineItem: [{ position: 30 }]
-    @UI.selectionField: [{ position: 30 }]
-    @UI.fieldGroup: [{
-        qualifier : 'ClaimDetails',
-        position  : 30
-    }]
-    status;
+@EndUserText.label: 'Status'
+
+@UI.lineItem: [
+  {
+    position                  : 30,
+    criticality               : 'status_criticality',
+    criticalityRepresentation : #WITH_ICON
+  }
+]
+
+@UI.selectionField: [
+  {
+    position : 30
+  }
+]
+
+@UI.fieldGroup: [
+  {
+    qualifier                  : 'ClaimDetails',
+    position                   : 30,
+    criticality                : 'status_criticality',
+    criticalityRepresentation  : #WITH_ICON
+  }
+]
+
+status;
+
+
+@UI.hidden: true
+status_criticality;
     @EndUserText.label: 'Trip Purpose'
     @UI.fieldGroup: [
       {
@@ -174,6 +249,46 @@ annotate entity ZC_KF_EC_CLAIM
       }
     ]
     last_changed_at;
+    
+    @EndUserText.label: 'Submitted On'
+@UI.fieldGroup: [{
+  qualifier : 'WorkflowInfo',
+  position  : 10
+}]
+submitted_on;
+
+
+@EndUserText.label: 'Decision Date'
+@UI.fieldGroup: [{
+  qualifier : 'WorkflowInfo',
+  position  : 20
+}]
+decision_date;
+
+
+@EndUserText.label: 'Rejection Reason'
+@UI.multiLineText: true
+@UI.fieldGroup: [{
+  qualifier : 'WorkflowInfo',
+  position  : 30
+}]
+rejection_reason;
+
+
+@EndUserText.label: 'Payment Reference'
+@UI.fieldGroup: [{
+  qualifier : 'WorkflowInfo',
+  position  : 40
+}]
+payment_reference;
+
+
+@EndUserText.label: 'Payment Date'
+@UI.fieldGroup: [{
+  qualifier : 'WorkflowInfo',
+  position  : 50
+}]
+payment_date;
     
    
 

@@ -16,6 +16,14 @@ define behavior for ZC_KF_EC_CLAIM //alias <alias_name>
   use action Resume;
   use action Prepare;
 
+  use action Submit;
+  use action Withdraw;
+  use action Approve;
+  use action Reject;
+  use action MarkAsPaid;
+  use action CopyClaim;
+  use action MassApprove;
+
   use association _line { create; with draft; }
 }
 
